@@ -8,6 +8,7 @@ steps:
     settings:
       repo: registry.thinkit.ir/teletin
       tags: latest
+      dockerfile: .docker/Dockerfile.local
 
 trigger:
   branch:
