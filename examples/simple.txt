@@ -1,0 +1,10 @@
+# This is an example for simple questions.
+
+:Question
+What's the answer to life, the universe and everything?
+
+:Hint
+Try Google!
+
+:Answer
+42

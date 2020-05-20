@@ -1,0 +1,20 @@
+# This is an example for multiple-choice questions.
+
+:Question
+What's the output of the below program.
+
+    #include <stdio.h>
+    int main() {
+        char a[] = { 'A', 'B', 'C', 'D' };
+        char* p = &a[0]; *p++;
+        printf("%c %c", *++p, --*p);
+    }
+
+:Choices
+- C B
+- B A
+- B C
+- C A
+
+:Answer
+4
