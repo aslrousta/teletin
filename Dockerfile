@@ -1,4 +1,4 @@
-FROM gcc:10 as builder
+FROM registry.thinkit.ir/gcc:10 as builder
 WORKDIR /src
 
 RUN apt-get update && \
@@ -8,7 +8,7 @@ RUN apt-get update && \
 COPY . .
 RUN make
 
-FROM debian:buster-slim
+FROM registry.thinkit.ir/debian:buster-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends ca-certificates libev4 && \
