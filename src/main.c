@@ -23,9 +23,36 @@ struct client {
   int wpos;
 };
 
-static int client_read(struct client *client) { return 0; }
+static int client_read(struct client *c) {
+  ssize_t received;
 
-static int client_write(struct client *client) { return 0; }
+  received = recv(c->w.fd, c->rbuf + c->rpos, 1024 - c->rpos, 0);
+  if (received <= 0) {
+    if (received < 0)
+      perror("failed to receive");
+    return -1;
+  }
+
+  c->rpos += received;
+  return 0;
+}
+
+static int client_write(struct client *c) {
+  ssize_t sent;
+
+  if (!c->wpos)
+    return 0;
+
+  sent = send(c->w.fd, c->wbuf, c->wpos, 0);
+  if (sent < 0) {
+    perror("failed to send");
+    return -1;
+  }
+
+  memmove(c->wbuf, c->wbuf + sent, c->wpos - sent);
+  c->wpos -= sent;
+  return 0;
+}
 
 static void do_client(struct ev_loop *loop, ev_io *w, int events) {
   struct client *client = (struct client *)w;
