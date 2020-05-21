@@ -14,65 +14,68 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static int client_read(int fd) {
-  char buf[1024];
-  ssize_t received;
-  int i;
+struct client {
+  ev_io w;
+  struct in_addr addr;
+  char rbuf[1024];
+  char wbuf[1024];
+  int rpos;
+  int wpos;
+};
 
-  received = recv(fd, buf, 1024, 0);
-  if (received <= 0) {
-    if (received < 0)
-      perror("couldn't read from client");
-    return -1;
-  }
+static int client_read(struct client *client) { return 0; }
 
-  printf("client sent: ");
-  for (i = 0; i < received; ++i)
-    printf("%02x ", buf[i]);
-  printf("\n");
-
-  return 0;
-}
+static int client_write(struct client *client) { return 0; }
 
 static void do_client(struct ev_loop *loop, ev_io *w, int events) {
-  if (events & EV_READ) {
-    if (client_read(w->fd) < 0) {
-      ev_io_stop(loop, w);
-      close(w->fd);
+  struct client *client = (struct client *)w;
 
-      printf("client closed\n");
-    }
-  }
+  if ((events & EV_READ) && client_read(client) < 0)
+    goto close;
+  if ((events & EV_WRITE) && client_write(client) < 0)
+    goto close;
+  return;
+
+close:
+  ev_io_stop(loop, &client->w);
+  close(client->w.fd);
+  free(client);
+
+  printf("client closed: %s\n", inet_ntoa(client->addr));
 }
 
 static void do_accept(struct ev_loop *loop, ev_io *w, int events) {
-  struct ev_io *w_client;
+  struct client *client;
   struct sockaddr_in remote_addr;
   socklen_t addrlen = sizeof(remote_addr);
   int clientfd;
 
   clientfd = accept(w->fd, (struct sockaddr *)&remote_addr, &addrlen);
   if (clientfd < 0) {
-    perror("couldn't accept the client");
+    perror("failed to accept");
     return;
   }
 
-  printf("client connected: %s\n", inet_ntoa(remote_addr.sin_addr));
+  client = (struct client *)malloc(sizeof(struct client));
+  client->addr = remote_addr.sin_addr;
+  client->rpos = 0;
+  client->wpos = 0;
 
-  w_client = (struct ev_io *)malloc(sizeof(struct ev_io));
-  ev_io_init(w_client, do_client, clientfd, EV_READ | EV_WRITE);
-  ev_io_start(loop, w_client);
+  ev_io_init(&client->w, do_client, clientfd, EV_READ | EV_WRITE);
+  ev_io_start(loop, &client->w);
+
+  printf("client connected: %s\n", inet_ntoa(remote_addr.sin_addr));
 }
 
 int main() {
   struct ev_loop *loop = EV_DEFAULT;
   struct sockaddr_in addr;
   struct ev_io w_accept;
-  int serverfd;
+  int fd;
 
-  serverfd = socket(PF_INET, SOCK_STREAM, 0);
-  if (serverfd < 0) {
-    perror("couldn't create server socket");
+  fd = socket(PF_INET, SOCK_STREAM, 0);
+  if (fd < 0) {
+    perror("failed to create server socket");
     return 1;
   }
 
@@ -80,23 +83,22 @@ int main() {
   addr.sin_addr.s_addr = 0;
   addr.sin_port = htons(23);
 
-  if (bind(serverfd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    perror("couldn't bind to :23");
-    close(serverfd);
+  if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+    perror("failed to bind");
+    close(fd);
     return 1;
   }
 
-  if (listen(serverfd, 8) < 0) {
-    perror("couldn't listen on :23");
-    close(serverfd);
+  if (listen(fd, 8) < 0) {
+    perror("failed to listen");
+    close(fd);
     return 1;
   }
 
-  ev_io_init(&w_accept, do_accept, serverfd, EV_READ);
+  ev_io_init(&w_accept, do_accept, fd, EV_READ);
   ev_io_start(loop, &w_accept);
-
   ev_run(loop, 0);
 
-  close(serverfd);
+  close(fd);
   return 0;
 }
