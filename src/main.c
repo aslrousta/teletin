@@ -14,11 +14,16 @@
 #include <stdlib.h>
 #include <unistd.h>
 
+#include "session.h"
+
+#define BUFSIZE 1024
+
 struct client {
   ev_io w;
+  struct session session;
   struct in_addr addr;
-  char rbuf[1024];
-  char wbuf[1024];
+  char rbuf[BUFSIZE];
+  char wbuf[BUFSIZE];
   int rpos;
   int wpos;
 };
@@ -26,10 +31,10 @@ struct client {
 static int client_read(struct client *c) {
   ssize_t received;
 
-  received = recv(c->w.fd, c->rbuf + c->rpos, 1024 - c->rpos, 0);
+  received = recv(c->w.fd, c->rbuf + c->rpos, BUFSIZE - c->rpos, 0);
   if (received <= 0) {
     if (received < 0)
-      perror("failed to receive");
+      perror("recv failed");
     return -1;
   }
 
@@ -40,27 +45,42 @@ static int client_read(struct client *c) {
 static int client_write(struct client *c) {
   ssize_t sent;
 
+  c->wpos += session_flush(&c->session, c->wbuf + c->wpos, BUFSIZE - c->wpos);
   if (!c->wpos)
     return 0;
 
   sent = send(c->w.fd, c->wbuf, c->wpos, 0);
   if (sent < 0) {
-    perror("failed to send");
+    perror("send failed");
     return -1;
   }
 
-  memmove(c->wbuf, c->wbuf + sent, c->wpos - sent);
+  if (sent < c->wpos)
+    memmove(c->wbuf, c->wbuf + sent, c->wpos - sent);
   c->wpos -= sent;
   return 0;
 }
 
 static void do_client(struct ev_loop *loop, ev_io *w, int events) {
   struct client *client = (struct client *)w;
+  int proced;
 
-  if ((events & EV_READ) && client_read(client) < 0)
-    goto close;
+  if (events & EV_READ) {
+    if (client_read(client) < 0)
+      goto close;
+
+    proced = session_proc(&client->session, client->rbuf, client->rpos);
+    if (proced < 0)
+      goto close;
+
+    if (proced < client->rpos)
+      memmove(client->rbuf, client->rbuf + proced, client->rpos - proced);
+    client->rpos -= proced;
+  }
+
   if ((events & EV_WRITE) && client_write(client) < 0)
     goto close;
+
   return;
 
 close:
@@ -68,7 +88,7 @@ close:
   close(client->w.fd);
   free(client);
 
-  printf("client closed: %s\n", inet_ntoa(client->addr));
+  printf("closed: %s\n", inet_ntoa(client->addr));
 }
 
 static void do_accept(struct ev_loop *loop, ev_io *w, int events) {
@@ -79,7 +99,7 @@ static void do_accept(struct ev_loop *loop, ev_io *w, int events) {
 
   clientfd = accept(w->fd, (struct sockaddr *)&remote_addr, &addrlen);
   if (clientfd < 0) {
-    perror("failed to accept");
+    perror("accept failed");
     return;
   }
 
@@ -88,13 +108,14 @@ static void do_accept(struct ev_loop *loop, ev_io *w, int events) {
   client->rpos = 0;
   client->wpos = 0;
 
+  session_init(&client->session);
   ev_io_init(&client->w, do_client, clientfd, EV_READ | EV_WRITE);
   ev_io_start(loop, &client->w);
 
-  printf("client connected: %s\n", inet_ntoa(remote_addr.sin_addr));
+  printf("connected: %s\n", inet_ntoa(remote_addr.sin_addr));
 }
 
-int main() {
+static int run() {
   struct ev_loop *loop = EV_DEFAULT;
   struct sockaddr_in addr;
   struct ev_io w_accept;
@@ -102,7 +123,7 @@ int main() {
 
   fd = socket(PF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
-    perror("failed to create server socket");
+    perror("socket failed");
     return 1;
   }
 
@@ -111,13 +132,13 @@ int main() {
   addr.sin_port = htons(23);
 
   if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
-    perror("failed to bind");
+    perror("bind failed");
     close(fd);
     return 1;
   }
 
   if (listen(fd, 8) < 0) {
-    perror("failed to listen");
+    perror("listen failed");
     close(fd);
     return 1;
   }
@@ -129,3 +150,5 @@ int main() {
   close(fd);
   return 0;
 }
+
+int main() { return run(); }
